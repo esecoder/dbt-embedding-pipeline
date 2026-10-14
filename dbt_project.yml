@@ -1,0 +1,24 @@
+name: 'embedding_pipeline'
+version: '1.0.0'
+config-version: 2
+profile: 'embedding_pipeline'
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+# ⚠️ MATERIALISATION IS A DELIBERATE CHOICE PER LAYER, not a default.
+#   staging  = view   -- cheap, always current, no storage, and it is only ever
+#                        queried through the marts
+#   marts    = table  -- read by the retrieval service on every query, so it is
+#                        worth paying to materialise
+# ⚠️ Materialising staging as tables would double warehouse cost for no gain, and
+# rebuilding every mart on every run is how a pipeline becomes slow without anyone
+# deciding it should be.
+models:
+  embedding_pipeline:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table

@@ -1,0 +1,85 @@
+version: 2
+
+# ⚠️⚠️ THE TESTS ARE THE POINT OF dbt, NOT THE SQL.
+#
+# The SQL above is ordinary SELECT statements and anyone can write them. What dbt adds
+# is that the assumptions are DECLARED and CHECKED on every run -- so a pipeline that
+# silently starts producing nulls, or duplicates, or an unapproved topic stops the
+# build instead of quietly feeding the retrieval service wrong data.
+
+models:
+  - name: stg_chunks
+    description: "One row per chunk, typed and flagged."
+    columns:
+      - name: doc_id
+        description: "Chunk identifier."
+        data_tests:
+          - unique
+          - not_null
+      - name: topic
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['retrieval', 'chunking', 'evaluation', 'serving', 'agents', 'vectors']
+      - name: characters
+        data_tests:
+          - not_null
+          # ⚠️ A RANGE TEST, not just not-null. Zero-length chunks are the failure that
+          # reaches production, because they are not null and they embed to noise.
+          - dbt_utils.accepted_range:
+              min_value: 1
+              inclusive: true
+      - name: has_embedding
+        data_tests:
+          - not_null
+      - name: is_usable
+        data_tests:
+          - not_null
+
+  - name: stg_sources
+    description: "Approval state per topic."
+    columns:
+      - name: topic
+        data_tests:
+          - unique
+          - not_null
+      - name: approved_pct
+        data_tests:
+          - not_null
+          # ⚠️ BOUNDED, because a percentage outside 0-100 means the denominator or the
+          # filter is wrong -- and a wrong percentage looks like a normal percentage.
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 100
+
+  - name: mart_topic_readiness
+    description: "Which topics the corpus can answer on, and why not."
+    columns:
+      - name: topic
+        data_tests:
+          - unique
+          - not_null
+      - name: is_answerable
+        data_tests:
+          - not_null
+      # ⚠️ THE RELATIONSHIP TEST THAT MATTERS: every topic in the readiness mart must
+      # exist in the source dimension. A mart that invents a topic is a join bug, and
+      # nothing else here would catch it.
+      - name: readiness_reason
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['ready', 'blocked: content not approved', 'blocked: chunks not embedded',
+                       'blocked: content not approved and not embedded']
+
+  - name: mart_chunk_quality
+    description: "Chunk size distribution per topic, with a diagnosis."
+    columns:
+      - name: topic
+        data_tests:
+          - unique
+          - not_null
+      - name: diagnosis
+        data_tests:
+          - accepted_values:
+              values: ['large chunks dominate', 'chunks are fragmented', 'embedding backlog', 'within range']
